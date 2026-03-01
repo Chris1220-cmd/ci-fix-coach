@@ -16,21 +16,33 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Get CI logs and call Claude
+      - name: Read system prompt
+        id: prompt
+        run: |
+          PROMPT=$(cat ci-fix-coach-system-prompt.txt)
+          echo "system_prompt<<PROMPT_EOF" >> "$GITHUB_OUTPUT"
+          echo "$PROMPT" >> "$GITHUB_OUTPUT"
+          echo "PROMPT_EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Get failed checks and call Claude
         uses: actions/github-script@v7
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SYSTEM_PROMPT: ${{ steps.prompt.outputs.system_prompt }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            // Wait for other checks to finish
             await new Promise(r => setTimeout(r, 15000));
 
+            // Get all checks for this PR
             const checks = await github.rest.checks.listForRef({
               owner: context.repo.owner,
               repo: context.repo.repo,
               ref: context.payload.pull_request.head.sha
             });
 
+            // Find only the failed ones
             const failed = checks.data.check_runs.filter(
               c => c.conclusion === 'failure'
             );
@@ -41,39 +53,17 @@ jobs:
             }
 
             const failedNames = failed.map(c => c.name).join(', ');
+            console.log('Failed jobs:', failedNames);
 
-            const prompt = `You are CI Fix Coach.
+            // Build a simple user message
+            const userMessage = [
+              'Failed CI jobs: ' + failedNames,
+              '',
+              'Analyze these failed jobs and give me your diagnosis in format A/B/C/D/E.',
+              'Keep it simple and practical.'
+            ].join('\n');
 
-Role:
-- You read CI failure logs and turn them into a simple diagnosis and practical steps.
-- You always speak in simple English, short clear sentences, as if explaining to a junior developer.
-
-Output:
-You ALWAYS answer ONLY in this format:
-
-A. <one short sentence that explains what failed>
-B. <one short sentence that explains why it failed>
-C. What you do now:
-1) <step 1>
-2) <step 2>
-3) <step 3>
-D. Local check:
-<command>
-E. File/change:
-<filename – short description>
-
-Rules:
-- Always start with A.
-- No greetings, no intro, no conclusion.
-- Do not add any other sections except A B C D E.
-- In section C you always write a numbered list (1, 2, 3).
-
-CI pipeline that failed:
-Failed jobs: ${failedNames}
-
-Below you will receive a small snippet from the CI error log.
-Use it to give a concrete and practical explanation.`;
-
+            // Call Claude API with system prompt from file
             const response = await fetch('https://api.anthropic.com/v1/messages', {
               method: 'POST',
               headers: {
@@ -82,21 +72,28 @@ Use it to give a concrete and practical explanation.`;
                 'content-type': 'application/json'
               },
               body: JSON.stringify({
-                model: 'claude-haiku-4-5',
+                model: 'claude-haiku-4-5-20251001',
                 max_tokens: 1024,
-                system: 'You are CI Fix Coach. Follow strictly the user instructions and format A/B/C/D/E.',
+                system: process.env.SYSTEM_PROMPT,
                 messages: [
                   {
                     role: 'user',
-                    content: prompt
+                    content: userMessage
                   }
                 ]
               })
             });
 
             const data = await response.json();
+
+            if (!data.content || !data.content[0]) {
+              console.log('Unexpected API response:', JSON.stringify(data));
+              return;
+            }
+
             const reply = data.content[0].text;
 
+            // Post comment on the PR
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
