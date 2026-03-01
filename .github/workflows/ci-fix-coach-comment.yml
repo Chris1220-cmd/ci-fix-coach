@@ -56,11 +56,54 @@ jobs:
             const failedNames = failed.map(c => c.name).join(', ');
             console.log('Failed jobs:', failedNames);
 
-            // Build a simple user message
+            // Fetch actual logs from failed workflow runs
+            let logSnippets = '';
+            for (const check of failed) {
+              // Get annotations (error messages) from the check run
+              const annotations = await github.rest.checks.listAnnotations({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                check_run_id: check.id
+              });
+
+              let snippet = '--- Job: ' + check.name + ' ---\n';
+
+              // Add check run output if available
+              if (check.output && check.output.summary) {
+                snippet += check.output.summary + '\n';
+              }
+
+              // Add annotations (these contain the actual error messages)
+              if (annotations.data.length > 0) {
+                for (const ann of annotations.data) {
+                  snippet += ann.annotation_level + ': ' + ann.message + '\n';
+                  if (ann.path) snippet += 'File: ' + ann.path + ':' + ann.start_line + '\n';
+                }
+              }
+
+              // If no annotations, try to get logs from the workflow run
+              if (annotations.data.length === 0 && !check.output?.summary) {
+                snippet += 'conclusion: ' + check.conclusion + '\n';
+                snippet += 'No detailed log available from checks API.\n';
+                snippet += 'Job name: ' + check.name + '\n';
+                if (check.output && check.output.text) {
+                  snippet += check.output.text.substring(0, 2000) + '\n';
+                }
+              }
+
+              logSnippets += snippet + '\n';
+            }
+
+            console.log('Log snippets:', logSnippets);
+
+            // Build user message with actual log content
             const userMessage = [
               'Failed CI jobs: ' + failedNames,
               '',
-              'Analyze these failed jobs and give me your diagnosis in format A/B/C/D/E.',
+              'Here are the error logs:',
+              logSnippets,
+              '',
+              'Analyze these failures and give me your diagnosis in format A/B/C/D/E.',
               'Keep it simple and practical.'
             ].join('\n');
 
