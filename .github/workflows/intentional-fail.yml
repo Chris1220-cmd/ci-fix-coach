@@ -1,4 +1,4 @@
-name: Intentional Fail – CI Fix Coach test
+name: Intentional Fail - CI Fix Coach test
 
 on:
   pull_request:
@@ -8,5 +8,7 @@ jobs:
   fail:
     runs-on: ubuntu-latest
     steps:
-      - name: This step always fails
-        run: exit 1
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Run tests
+        run: npm test
