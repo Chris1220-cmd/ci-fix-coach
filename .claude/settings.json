@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm run build)"
+      "Bash(npm run build)",
+      "Bash(git checkout main)",
+      "Bash(git pull)",
+      "Bash(git pull origin main)",
+      "Bash(git checkout -b phase2-features)"
     ]
   }
 }
