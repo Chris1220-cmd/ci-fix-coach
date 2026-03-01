@@ -283,3 +283,5 @@ Error: Process completed with exit code 1.
 
 Ε. Αρχείο/αλλαγή:
 - CI config (`.github/workflows/ci.yml` ή αντίστοιχο) – προσθήκη της env variable από secrets.
+
+<!-- test ci-fix-coach workflow -->

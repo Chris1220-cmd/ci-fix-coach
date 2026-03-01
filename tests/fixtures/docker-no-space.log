@@ -1,0 +1,7 @@
+#15 120.3 writing image sha256:abcd1234...
+#15 121.0 error: failed to copy: write /var/lib/docker/overlay2/abcdef123456/diff/usr/local/lib: no space left on device
+------
+ > exporting to image:
+------
+Docker build failed: no space left on device
+Error: Process completed with exit code 1.

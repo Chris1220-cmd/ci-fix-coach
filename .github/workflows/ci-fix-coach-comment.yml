@@ -1,23 +1,33 @@
-name: CI Fix Coach – test PR comment
+name: CI Fix Coach
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
 
-jobs:
-  comment:
-    runs-on: ubuntu-latest
+permissions:
+  contents: read
+  checks: read
+  actions: read
+  issues: write
+  pull-requests: write
 
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
     steps:
-      - name: Add test comment to PR
-        uses: actions/github-script@v7
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
+          node-version: '20'
+
+      - name: CI Fix Coach
+        uses: ./
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            // Simple test: add a static comment to the PR
-            github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: '🤖 CI Fix Coach test: workflow is wired correctly.'
-            })
+          model: 'claude-haiku-4-5-20251001'
+          log-lines: '120'
+          wait-seconds: '15'

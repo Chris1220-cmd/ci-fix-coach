@@ -1,0 +1,15 @@
+Run npm run build
+> tsc --noEmit
+
+src/components/UserCard.tsx:18:9 - error TS2322: Type 'string' is not assignable to type 'number'.
+
+18         age={user.age}
+           ~~~
+
+  src/types/User.ts:4:3
+    4   age: number;
+        ~~~
+    The expected type comes from property 'age'
+
+Found 1 error in src/components/UserCard.tsx:18
+Error: Process completed with exit code 2.
