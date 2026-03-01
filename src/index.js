@@ -7,6 +7,24 @@ const { callClaude } = require('./claude-client');
 const { enforceFormat, validateFormat } = require('./post-processor');
 const { upsertComment } = require('./comment-manager');
 
+const FALLBACK_MODEL = 'claude-sonnet-4-20250514';
+
+async function getChangedFiles(octokit, context) {
+  try {
+    const prNumber = context.payload.pull_request.number;
+    const files = await octokit.rest.pulls.listFiles({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      pull_number: prNumber,
+      per_page: 100
+    });
+    return files.data.map(f => f.filename);
+  } catch (e) {
+    console.log(`Could not fetch changed files: ${e.message}`);
+    return [];
+  }
+}
+
 async function run() {
   try {
     // Read inputs
@@ -39,25 +57,42 @@ async function run() {
     console.log(`Failed jobs: ${failedNames.join(', ')}`);
     console.log(`Log snippets length: ${logSnippets.length} chars`);
 
+    // Fetch changed files for monorepo awareness
+    const changedFiles = await getChangedFiles(octokit, context);
+    if (changedFiles.length > 0) {
+      console.log(`Changed files in PR: ${changedFiles.length}`);
+    }
+
     // Read system prompt from file
     const promptPath = path.join(process.env.GITHUB_WORKSPACE || '.', 'ci-fix-coach-system-prompt.txt');
     const systemPrompt = fs.readFileSync(promptPath, 'utf-8');
 
-    // Build user message
-    const userMessage = [
+    // Build user message with changed files context
+    const messageParts = [
       `Failed CI jobs: ${failedNames.join(', ')}`,
-      '',
+      ''
+    ];
+
+    if (changedFiles.length > 0 && changedFiles.length <= 50) {
+      messageParts.push('Files changed in this PR:');
+      messageParts.push(changedFiles.join('\n'));
+      messageParts.push('');
+    }
+
+    messageParts.push(
       'Here are the error logs:',
       logSnippets,
       '',
       'Analyze these failures. Reply ONLY in A/B/C/D/E format.',
       'IMPORTANT: Section C MUST use numbered steps: 1) ... 2) ... 3) ...',
       'Start your reply with A. on the first line. No other text.'
-    ].join('\n');
+    );
 
-    // Call Claude
+    const userMessage = messageParts.join('\n');
+
+    // Call Claude (primary model)
     console.log(`Calling Claude (${model})...`);
-    const result = await callClaude({
+    let result = await callClaude({
       apiKey: anthropicApiKey,
       model,
       systemPrompt,
@@ -68,11 +103,26 @@ async function run() {
 
     // Post-process to enforce format
     let reply = enforceFormat(result.text);
-    const validation = validateFormat(reply);
+    let validation = validateFormat(reply);
+    let modelUsed = model;
+
+    // Fallback to Sonnet if format validation fails
+    if (!validation.valid && model !== FALLBACK_MODEL) {
+      console.log(`Format validation failed with ${model}, falling back to ${FALLBACK_MODEL}...`);
+      result = await callClaude({
+        apiKey: anthropicApiKey,
+        model: FALLBACK_MODEL,
+        systemPrompt,
+        userMessage
+      });
+      reply = enforceFormat(result.text);
+      validation = validateFormat(reply);
+      modelUsed = FALLBACK_MODEL;
+      console.log(`Fallback response: ${result.inputTokens} input, ${result.outputTokens} output tokens`);
+    }
 
     if (!validation.valid) {
-      console.log(`Format validation failed: ${JSON.stringify(validation)}`);
-      console.log('Using post-processed output anyway.');
+      console.log(`Format still invalid after fallback: ${JSON.stringify(validation)}`);
     }
 
     // Post comment on PR (with dedup)
@@ -80,11 +130,11 @@ async function run() {
 
     // Set outputs
     core.setOutput('diagnosis', reply);
-    core.setOutput('model-used', result.model);
+    core.setOutput('model-used', modelUsed);
     core.setOutput('input-tokens', result.inputTokens.toString());
     core.setOutput('output-tokens', result.outputTokens.toString());
 
-    console.log('CI Fix Coach completed successfully.');
+    console.log(`CI Fix Coach completed successfully (model: ${modelUsed}).`);
 
   } catch (error) {
     core.setFailed(`CI Fix Coach failed: ${error.message}`);
