@@ -1,0 +1,12 @@
+name: Intentional Fail – CI Fix Coach test
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  fail:
+    runs-on: ubuntu-latest
+    steps:
+      - name: This step always fails
+        run: exit 1
