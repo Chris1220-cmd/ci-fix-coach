@@ -7,6 +7,7 @@ on:
 permissions:
   contents: read
   checks: read
+  actions: read
   issues: write
   pull-requests: write
 
@@ -56,45 +57,67 @@ jobs:
             const failedNames = failed.map(c => c.name).join(', ');
             console.log('Failed jobs:', failedNames);
 
-            // Fetch actual logs from failed workflow runs
+            // Get workflow runs for this commit to download real logs
+            const runs = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head_sha: context.payload.pull_request.head.sha
+            });
+
             let logSnippets = '';
-            for (const check of failed) {
-              // Get annotations (error messages) from the check run
-              const annotations = await github.rest.checks.listAnnotations({
+
+            for (const run of runs.data.workflow_runs) {
+              if (run.conclusion !== 'failure') continue;
+
+              // Get jobs for this run
+              const jobs = await github.rest.actions.listJobsForWorkflowRun({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                check_run_id: check.id
+                run_id: run.id
               });
 
-              let snippet = '--- Job: ' + check.name + ' ---\n';
+              for (const job of jobs.data.jobs) {
+                if (job.conclusion !== 'failure') continue;
 
-              // Add check run output if available
-              if (check.output && check.output.summary) {
-                snippet += check.output.summary + '\n';
-              }
+                let snippet = '--- Job: ' + job.name + ' ---\n';
 
-              // Add annotations (these contain the actual error messages)
-              if (annotations.data.length > 0) {
-                for (const ann of annotations.data) {
-                  snippet += ann.annotation_level + ': ' + ann.message + '\n';
-                  if (ann.path) snippet += 'File: ' + ann.path + ':' + ann.start_line + '\n';
+                try {
+                  // Download the actual job log
+                  const logResponse = await github.rest.actions.downloadJobLogsForWorkflowRun({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    job_id: job.id
+                  });
+
+                  // logResponse.data is the raw log text
+                  const fullLog = typeof logResponse.data === 'string'
+                    ? logResponse.data
+                    : String(logResponse.data);
+
+                  // Get last 80 lines (where the error usually is)
+                  const lines = fullLog.split('\n');
+                  const last80 = lines.slice(-80).join('\n');
+                  snippet += last80 + '\n';
+                } catch (e) {
+                  snippet += 'Could not download logs: ' + e.message + '\n';
+                  // Fallback: use failed steps info
+                  for (const step of job.steps || []) {
+                    if (step.conclusion === 'failure') {
+                      snippet += 'Failed step: ' + step.name + '\n';
+                    }
+                  }
                 }
-              }
 
-              // If no annotations, try to get logs from the workflow run
-              if (annotations.data.length === 0 && !check.output?.summary) {
-                snippet += 'conclusion: ' + check.conclusion + '\n';
-                snippet += 'No detailed log available from checks API.\n';
-                snippet += 'Job name: ' + check.name + '\n';
-                if (check.output && check.output.text) {
-                  snippet += check.output.text.substring(0, 2000) + '\n';
-                }
+                logSnippets += snippet + '\n';
               }
-
-              logSnippets += snippet + '\n';
             }
 
-            console.log('Log snippets:', logSnippets);
+            console.log('Log snippets length:', logSnippets.length);
+
+            // If no logs found, use check names as fallback
+            if (!logSnippets.trim()) {
+              logSnippets = 'Failed checks: ' + failedNames + '\nNo detailed logs available.\n';
+            }
 
             // Build user message with actual log content
             const userMessage = [
