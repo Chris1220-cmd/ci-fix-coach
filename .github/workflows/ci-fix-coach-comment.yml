@@ -20,8 +20,6 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const fetch = require('fetch') || globalThis.fetch;
-
             // 1. Παίρνουμε τα failed checks του PR
             const checks = await github.rest.checks.listForRef({
               owner: context.repo.owner,
