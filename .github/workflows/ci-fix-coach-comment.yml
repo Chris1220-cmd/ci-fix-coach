@@ -126,8 +126,9 @@ jobs:
               'Here are the error logs:',
               logSnippets,
               '',
-              'Analyze these failures and give me your diagnosis in format A/B/C/D/E.',
-              'Keep it simple and practical.'
+              'Analyze these failures. Reply ONLY in A/B/C/D/E format.',
+              'IMPORTANT: Section C MUST use numbered steps: 1) ... 2) ... 3) ...',
+              'Start your reply with A. on the first line. No other text.'
             ].join('\n');
 
             // Call Claude API with system prompt from file
