@@ -1,0 +1,25 @@
+{
+  "name": "ci-fix-coach",
+  "version": "1.0.0",
+  "description": "AI-powered CI failure diagnosis — get actionable fix suggestions on your PRs",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test tests/**/*.test.js"
+  },
+  "keywords": [
+    "ci",
+    "cd",
+    "github-actions",
+    "ai",
+    "diagnosis",
+    "devtools"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@actions/core": "^3.0.0",
+    "@actions/github": "^9.0.0"
+  }
+}

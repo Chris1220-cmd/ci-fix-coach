@@ -1,0 +1,14 @@
+Run npm test
+> jest --ci
+
+RUNS  src/services/api.test.ts
+
+  ● Test suite failed to run
+
+    Timeout - Async callback was not invoked within the 5000 ms timeout specified by jest.setTimeout.
+
+      at src/services/api.test.ts:15:5
+
+Test Suites: 1 failed, 8 passed, 9 total
+Tests:       0 of 1 total
+Error: Process completed with exit code 1.

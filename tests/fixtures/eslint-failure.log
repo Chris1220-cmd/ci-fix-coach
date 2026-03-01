@@ -1,0 +1,17 @@
+Run npm run lint
+> eslint src/ --ext .ts,.tsx
+
+/home/runner/work/app/src/components/Header.tsx
+  12:5  error  Unexpected console statement  no-console
+  45:1  error  Missing semicolon             semi
+  67:3  error  'unused' is assigned a value but never used  no-unused-vars
+
+/home/runner/work/app/src/utils/format.ts
+  8:1   error  Delete `··`  prettier/prettier
+
+✖ 4 problems (4 errors, 0 warnings)
+  2 errors and 0 warnings potentially fixable with the `--fix` option.
+
+npm ERR! code ELIFECYCLE
+npm ERR! errno 1
+Error: Process completed with exit code 1.

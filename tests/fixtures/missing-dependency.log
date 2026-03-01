@@ -1,0 +1,15 @@
+Run npm ci
+npm warn deprecated inflight@1.0.6
+
+added 1247 packages in 32s
+
+Run npm run build
+> tsc && vite build
+
+src/services/api.ts:2:21 - error TS2307: Cannot find module 'axios' or its corresponding type declarations.
+
+2 import axios from 'axios';
+                    ~~~~~~~
+
+Found 1 error.
+Error: Process completed with exit code 2.

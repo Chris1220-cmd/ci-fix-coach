@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install @actions/core @actions/github)"
+    ]
+  }
+}
