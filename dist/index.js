@@ -29459,25 +29459,31 @@ function enforceFormat(rawText) {
   text = text.replace(/`([^`\n]+)`/g, '$1');
 
   // 3. Enforce numbered steps in section C
-  const sectionCRegex = /(C\.\s*What you do now:?\s*\n)([\s\S]*?)(\n[DE]\.)/i;
+  // Match C section header (various formats) up to D. or E.
+  const sectionCRegex = /(C\.[\s\S]*?(?:now|steps|do):?\s*\n\s*\n?)([\s\S]*?)(\n\s*D\.)/i;
   const cMatch = text.match(sectionCRegex);
   if (cMatch) {
-    const header = cMatch[1];
+    const header = 'C. What you do now:\n';
     const body = cMatch[2];
     const nextSection = cMatch[3];
 
     const lines = body.split('\n').filter(l => l.trim());
-    let stepNum = 1;
-    const numbered = lines.map(line => {
-      const cleaned = line
-        .replace(/^\s*[-*•]\s*/, '')
-        .replace(/^\s*\d+[.)]\s*/, '')
-        .trim();
-      if (cleaned) return `${stepNum++}) ${cleaned}`;
-      return '';
-    }).filter(Boolean).join('\n');
+    // Check if steps are already properly numbered
+    const alreadyNumbered = lines.every(l => /^\d+\)\s/.test(l.trim()));
 
-    text = text.replace(sectionCRegex, header + numbered + nextSection);
+    if (!alreadyNumbered) {
+      let stepNum = 1;
+      const numbered = lines.map(line => {
+        const cleaned = line
+          .replace(/^\s*[-*•]\s*/, '')
+          .replace(/^\s*\d+[.)]\s*/, '')
+          .trim();
+        if (cleaned) return `${stepNum++}) ${cleaned}`;
+        return '';
+      }).filter(Boolean).join('\n');
+
+      text = text.replace(sectionCRegex, header + numbered + nextSection);
+    }
   }
 
   // 4. Strip any text after E section's content (trailing notes, summaries)

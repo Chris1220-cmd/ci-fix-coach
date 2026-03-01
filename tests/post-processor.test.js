@@ -31,6 +31,16 @@ describe('enforceFormat', () => {
     assert.ok(!result.includes('`'), 'Should strip backticks');
   });
 
+  it('should handle blank line after C header (real Haiku output)', () => {
+    const input = `A. The npm test command failed because the glob pattern did not match.\nB. Test files do not exist at the expected path.\nC. What you do now:\n\nCheck the actual directory structure locally.\nVerify the tests directory exists.\nUpdate the test script in package.json.\nRun npm test locally.\nCommit the updated package.json.\nD. Local check:\nfind . -type f -name "*.test.js"\nE. File/change:\npackage.json – update the test script glob pattern.`;
+    const result = enforceFormat(input);
+    assert.ok(result.includes('1) Check'), 'Should number first step');
+    assert.ok(result.includes('2) Verify'), 'Should number second step');
+    assert.ok(result.includes('3) Update'), 'Should number third step');
+    const validation = validateFormat(result);
+    assert.ok(validation.valid, 'Should be valid after post-processing');
+  });
+
   it('should handle already-correct format', () => {
     const input = `A. The npm test command failed because package.json is missing.\nB. The repository does not have a package.json file.\nC. What you do now:\n1) Check if package.json exists.\n2) If missing, run npm init.\n3) Add test script.\n4) Commit and push.\nD. Local check:\nls package.json\nE. File/change:\npackage.json – create it.`;
     const result = enforceFormat(input);
