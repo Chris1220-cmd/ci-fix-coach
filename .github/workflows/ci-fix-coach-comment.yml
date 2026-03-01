@@ -9,7 +9,6 @@ permissions:
   issues: write
   pull-requests: write
 
-
 jobs:
   comment:
     runs-on: ubuntu-latest
@@ -21,6 +20,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            await new Promise(r => setTimeout(r, 15000));
             const checks = await github.rest.checks.listForRef({
               owner: context.repo.owner,
               repo: context.repo.repo,
