@@ -29352,6 +29352,13 @@ const ERROR_PATTERNS = [
   /ModuleNotFoundError/, /ImportError/, /SyntaxError/, /TypeError/
 ];
 
+// Job/check names to exclude (self-exclusion)
+const SELF_EXCLUSION_NAMES = ['CI Fix Coach', 'diagnose'];
+
+function isSelfExcluded(name) {
+  return SELF_EXCLUSION_NAMES.some(n => name === n || name.startsWith('CI Fix Coach'));
+}
+
 function extractRelevantSection(fullLog, maxLines = 120) {
   const lines = fullLog.split('\n');
 
@@ -29379,12 +29386,14 @@ async function fetchFailedJobLogs(github, context, { maxLines = 120 } = {}) {
   const repo = context.repo.repo;
   const headSha = context.payload.pull_request.head.sha;
 
-  // Get all checks for this PR
+  // Get all checks for this PR, excluding our own action
   const checks = await github.rest.checks.listForRef({ owner, repo, ref: headSha });
-  const failed = checks.data.check_runs.filter(c => c.conclusion === 'failure');
+  const failed = checks.data.check_runs.filter(c =>
+    c.conclusion === 'failure' && !isSelfExcluded(c.name)
+  );
 
   if (failed.length === 0) {
-    return { failedNames: [], logSnippets: '', hasFailures: false };
+    return { failedNames: [], logSnippets: '', jobLogs: [], hasFailures: false };
   }
 
   const failedNames = failed.map(c => c.name);
@@ -29394,7 +29403,7 @@ async function fetchFailedJobLogs(github, context, { maxLines = 120 } = {}) {
     owner, repo, head_sha: headSha
   });
 
-  let logSnippets = '';
+  const jobLogs = []; // [{name, snippet}]
 
   for (const run of runs.data.workflow_runs) {
     if (run.conclusion !== 'failure') continue;
@@ -29405,8 +29414,9 @@ async function fetchFailedJobLogs(github, context, { maxLines = 120 } = {}) {
 
     for (const job of jobs.data.jobs) {
       if (job.conclusion !== 'failure') continue;
+      if (isSelfExcluded(job.name)) continue;
 
-      let snippet = `--- Job: ${job.name} ---\n`;
+      let snippet = '';
 
       try {
         const logResponse = await github.rest.actions.downloadJobLogsForWorkflowRun({
@@ -29417,9 +29427,9 @@ async function fetchFailedJobLogs(github, context, { maxLines = 120 } = {}) {
           ? logResponse.data
           : String(logResponse.data);
 
-        snippet += extractRelevantSection(fullLog, maxLines) + '\n';
+        snippet = extractRelevantSection(fullLog, maxLines);
       } catch (e) {
-        snippet += `Could not download logs: ${e.message}\n`;
+        snippet = `Could not download logs: ${e.message}\n`;
         // Fallback: list failed steps
         for (const step of job.steps || []) {
           if (step.conclusion === 'failure') {
@@ -29428,15 +29438,22 @@ async function fetchFailedJobLogs(github, context, { maxLines = 120 } = {}) {
         }
       }
 
-      logSnippets += snippet + '\n';
+      jobLogs.push({ name: job.name, snippet });
     }
   }
 
-  if (!logSnippets.trim()) {
-    logSnippets = `Failed checks: ${failedNames.join(', ')}\nNo detailed logs available.\n`;
+  // Fallback: if no job logs fetched (e.g. log download failed entirely)
+  if (jobLogs.length === 0) {
+    const fallbackSnippet = `Failed checks: ${failedNames.join(', ')}\nNo detailed logs available.\n`;
+    jobLogs.push({ name: failedNames[0] || 'unknown', snippet: fallbackSnippet });
   }
 
-  return { failedNames, logSnippets, hasFailures: true };
+  // Build combined logSnippets string for backward compat
+  const logSnippets = jobLogs
+    .map(j => `--- Job: ${j.name} ---\n${j.snippet}`)
+    .join('\n\n');
+
+  return { failedNames, logSnippets, jobLogs, hasFailures: true };
 }
 
 module.exports = { fetchFailedJobLogs, extractRelevantSection };
@@ -31442,6 +31459,45 @@ const { upsertComment } = __nccwpck_require__(6854);
 
 const FALLBACK_MODEL = 'claude-sonnet-4-20250514';
 
+async function analyzeJob({ jobName, jobSnippet, changedFiles, systemPrompt, model, anthropicApiKey }) {
+  const messageParts = [
+    `Failed CI job: ${jobName}`,
+    ''
+  ];
+
+  if (changedFiles.length > 0 && changedFiles.length <= 50) {
+    messageParts.push('Files changed in this PR:');
+    messageParts.push(changedFiles.join('\n'));
+    messageParts.push('');
+  }
+
+  messageParts.push(
+    'Here is the error log:',
+    jobSnippet,
+    '',
+    'Analyze this failure. Reply ONLY in A/B/C/D/E format.',
+    'IMPORTANT: Section C MUST use numbered steps: 1) ... 2) ... 3) ...',
+    'Start your reply with A. on the first line. No other text.'
+  );
+
+  const userMessage = messageParts.join('\n');
+
+  let result = await callClaude({ apiKey: anthropicApiKey, model, systemPrompt, userMessage });
+  let reply = enforceFormat(result.text);
+  let validation = validateFormat(reply);
+  let modelUsed = model;
+
+  if (!validation.valid && model !== FALLBACK_MODEL) {
+    console.log(`  Format validation failed with ${model}, falling back to ${FALLBACK_MODEL}...`);
+    result = await callClaude({ apiKey: anthropicApiKey, model: FALLBACK_MODEL, systemPrompt, userMessage });
+    reply = enforceFormat(result.text);
+    validation = validateFormat(reply);
+    modelUsed = FALLBACK_MODEL;
+  }
+
+  return { reply, validation, modelUsed, inputTokens: result.inputTokens, outputTokens: result.outputTokens };
+}
+
 async function getChangedFiles(octokit, context) {
   try {
     const prNumber = context.payload.pull_request.number;
@@ -31478,7 +31534,7 @@ async function run() {
 
     // Fetch failed job logs
     console.log('Fetching failed job logs...');
-    const { failedNames, logSnippets, hasFailures } = await fetchFailedJobLogs(
+    const { failedNames, jobLogs, hasFailures } = await fetchFailedJobLogs(
       octokit, context, { maxLines }
     );
 
@@ -31488,7 +31544,7 @@ async function run() {
     }
 
     console.log(`Failed jobs: ${failedNames.join(', ')}`);
-    console.log(`Log snippets length: ${logSnippets.length} chars`);
+    console.log(`Jobs to analyze: ${jobLogs.length}`);
 
     // Fetch changed files for monorepo awareness
     const changedFiles = await getChangedFiles(octokit, context);
@@ -31496,78 +31552,59 @@ async function run() {
       console.log(`Changed files in PR: ${changedFiles.length}`);
     }
 
-    // Read system prompt from file
-    const promptPath = path.join(process.env.GITHUB_WORKSPACE || '.', 'ci-fix-coach-system-prompt.txt');
+    // Read system prompt from action's own directory (GITHUB_ACTION_PATH),
+    // not from the user's repo workspace (GITHUB_WORKSPACE)
+    const promptPath = path.join(process.env.GITHUB_ACTION_PATH || '.', 'ci-fix-coach-system-prompt.txt');
     const systemPrompt = fs.readFileSync(promptPath, 'utf-8');
 
-    // Build user message with changed files context
-    const messageParts = [
-      `Failed CI jobs: ${failedNames.join(', ')}`,
-      ''
-    ];
+    // Analyze each failed job separately
+    const analyses = [];
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let lastModelUsed = model;
 
-    if (changedFiles.length > 0 && changedFiles.length <= 50) {
-      messageParts.push('Files changed in this PR:');
-      messageParts.push(changedFiles.join('\n'));
-      messageParts.push('');
-    }
-
-    messageParts.push(
-      'Here are the error logs:',
-      logSnippets,
-      '',
-      'Analyze these failures. Reply ONLY in A/B/C/D/E format.',
-      'IMPORTANT: Section C MUST use numbered steps: 1) ... 2) ... 3) ...',
-      'Start your reply with A. on the first line. No other text.'
-    );
-
-    const userMessage = messageParts.join('\n');
-
-    // Call Claude (primary model)
-    console.log(`Calling Claude (${model})...`);
-    let result = await callClaude({
-      apiKey: anthropicApiKey,
-      model,
-      systemPrompt,
-      userMessage
-    });
-
-    console.log(`Claude response: ${result.inputTokens} input tokens, ${result.outputTokens} output tokens`);
-
-    // Post-process to enforce format
-    let reply = enforceFormat(result.text);
-    let validation = validateFormat(reply);
-    let modelUsed = model;
-
-    // Fallback to Sonnet if format validation fails
-    if (!validation.valid && model !== FALLBACK_MODEL) {
-      console.log(`Format validation failed with ${model}, falling back to ${FALLBACK_MODEL}...`);
-      result = await callClaude({
-        apiKey: anthropicApiKey,
-        model: FALLBACK_MODEL,
+    for (const { name, snippet } of jobLogs) {
+      console.log(`Analyzing job: ${name}...`);
+      const { reply, validation, modelUsed, inputTokens, outputTokens } = await analyzeJob({
+        jobName: name,
+        jobSnippet: snippet,
+        changedFiles,
         systemPrompt,
-        userMessage
+        model,
+        anthropicApiKey
       });
-      reply = enforceFormat(result.text);
-      validation = validateFormat(reply);
-      modelUsed = FALLBACK_MODEL;
-      console.log(`Fallback response: ${result.inputTokens} input, ${result.outputTokens} output tokens`);
+
+      console.log(`  Model: ${modelUsed}, tokens: ${inputTokens}/${outputTokens}, format valid: ${validation.valid}`);
+      if (!validation.valid) {
+        console.log(`  Format still invalid after fallback: ${JSON.stringify(validation)}`);
+      }
+
+      analyses.push({ name, reply });
+      totalInputTokens += inputTokens;
+      totalOutputTokens += outputTokens;
+      lastModelUsed = modelUsed;
     }
 
-    if (!validation.valid) {
-      console.log(`Format still invalid after fallback: ${JSON.stringify(validation)}`);
+    // Build final reply: single A-E block for one job, sectioned for multiple
+    let finalReply;
+    if (analyses.length === 1) {
+      finalReply = analyses[0].reply;
+    } else {
+      finalReply = analyses
+        .map(a => `### ${a.name}\n\n${a.reply}`)
+        .join('\n\n---\n\n');
     }
 
     // Post comment on PR (with dedup)
-    await upsertComment(octokit, context, reply);
+    await upsertComment(octokit, context, finalReply);
 
     // Set outputs
-    core.setOutput('diagnosis', reply);
-    core.setOutput('model-used', modelUsed);
-    core.setOutput('input-tokens', result.inputTokens.toString());
-    core.setOutput('output-tokens', result.outputTokens.toString());
+    core.setOutput('diagnosis', finalReply);
+    core.setOutput('model-used', lastModelUsed);
+    core.setOutput('input-tokens', totalInputTokens.toString());
+    core.setOutput('output-tokens', totalOutputTokens.toString());
 
-    console.log(`CI Fix Coach completed successfully (model: ${modelUsed}).`);
+    console.log(`CI Fix Coach completed successfully (model: ${lastModelUsed}, jobs: ${analyses.length}).`);
 
   } catch (error) {
     core.setFailed(`CI Fix Coach failed: ${error.message}`);
