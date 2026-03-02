@@ -5,10 +5,32 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
-  fail:
+  lint-check:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Run tests
-        run: npm test
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Create test file with lint errors
+        run: |
+          mkdir -p src
+          cat > src/app.js << 'EOF'
+          var x = 1
+          var y = 2
+          console.log(x)
+          if(x == y){
+            console.log("equal")
+          }
+          EOF
+
+      - name: Install and run ESLint
+        run: |
+          npm init -y > /dev/null 2>&1
+          npm install eslint@8 --save-dev > /dev/null 2>&1
+          echo '{ "rules": { "no-var": "error", "eqeqeq": "error", "semi": "error", "no-console": "warn" } }' > .eslintrc.json
+          npx eslint src/app.js
