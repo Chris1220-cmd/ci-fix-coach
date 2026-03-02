@@ -5,7 +5,22 @@
       "Bash(git checkout main)",
       "Bash(git pull)",
       "Bash(git pull origin main)",
-      "Bash(git checkout -b phase2-features)"
+      "Bash(git checkout -b phase2-features)",
+      "Bash(git remote add new-repo https://github.com/Chris1220-cmd/ci-fix-coach.git)",
+      "Bash(git add README.md)",
+      "Bash(git commit -m \"fix: update action reference to ci-fix-coach repo\")",
+      "Bash(git push new-repo main)",
+      "Bash(git pull new-repo main --allow-unrelated-histories --no-edit)",
+      "Bash(git tag -a v1 -m \"v1.0.0 - Initial release\")",
+      "Bash(git tag -a v1.0.0 -m \"v1.0.0 - Initial release\")",
+      "Bash(git push new-repo v1 v1.0.0)",
+      "Bash(git checkout -b test-new-repo)",
+      "Bash(git commit --allow-empty -m \"test: verify CI Fix Coach on new repo\")",
+      "Bash(git push new-repo test-new-repo)",
+      "Bash(git checkout -b test-real-failures)",
+      "Bash(git add -A)",
+      "Bash(git commit -m \"test: realistic ESLint failure for CI Fix Coach testing\")",
+      "Bash(git push new-repo test-real-failures)"
     ]
   }
 }
