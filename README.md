@@ -65,7 +65,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - uses: Chris1220-cmd/athan@main
+      - uses: Chris1220-cmd/ci-fix-coach@v1
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
