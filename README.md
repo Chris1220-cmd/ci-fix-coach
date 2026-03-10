@@ -1,5 +1,10 @@
 # CI Fix Coach
 
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-CI%20Fix%20Coach-blue?logo=github)](https://github.com/marketplace/actions/ci-fix-coach)
+[![Version](https://img.shields.io/github/v/release/Chris1220-cmd/ci-fix-coach?color=green&label=version)](https://github.com/Chris1220-cmd/ci-fix-coach/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Stars](https://img.shields.io/github/stars/Chris1220-cmd/ci-fix-coach?style=social)](https://github.com/Chris1220-cmd/ci-fix-coach/stargazers)
+
 **Your CI failed. Here is exactly what to fix.**
 
 CI Fix Coach is a GitHub Action that automatically diagnoses CI failures and posts actionable fix instructions directly on your pull request. No more digging through logs — get a precise diagnosis in seconds.
