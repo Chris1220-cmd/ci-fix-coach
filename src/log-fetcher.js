@@ -9,6 +9,13 @@ const ERROR_PATTERNS = [
   /ModuleNotFoundError/, /ImportError/, /SyntaxError/, /TypeError/
 ];
 
+// Job/check names to exclude (self-exclusion)
+const SELF_EXCLUSION_NAMES = ['CI Fix Coach', 'diagnose'];
+
+function isSelfExcluded(name) {
+  return SELF_EXCLUSION_NAMES.some(n => name === n || name.startsWith('CI Fix Coach'));
+}
+
 function extractRelevantSection(fullLog, maxLines = 120) {
   const lines = fullLog.split('\n');
 
@@ -36,12 +43,14 @@ async function fetchFailedJobLogs(github, context, { maxLines = 120 } = {}) {
   const repo = context.repo.repo;
   const headSha = context.payload.pull_request.head.sha;
 
-  // Get all checks for this PR
+  // Get all checks for this PR, excluding our own action
   const checks = await github.rest.checks.listForRef({ owner, repo, ref: headSha });
-  const failed = checks.data.check_runs.filter(c => c.conclusion === 'failure');
+  const failed = checks.data.check_runs.filter(c =>
+    c.conclusion === 'failure' && !isSelfExcluded(c.name)
+  );
 
   if (failed.length === 0) {
-    return { failedNames: [], logSnippets: '', hasFailures: false };
+    return { failedNames: [], logSnippets: '', jobLogs: [], hasFailures: false };
   }
 
   const failedNames = failed.map(c => c.name);
@@ -51,7 +60,7 @@ async function fetchFailedJobLogs(github, context, { maxLines = 120 } = {}) {
     owner, repo, head_sha: headSha
   });
 
-  let logSnippets = '';
+  const jobLogs = []; // [{name, snippet}]
 
   for (const run of runs.data.workflow_runs) {
     if (run.conclusion !== 'failure') continue;
@@ -62,8 +71,9 @@ async function fetchFailedJobLogs(github, context, { maxLines = 120 } = {}) {
 
     for (const job of jobs.data.jobs) {
       if (job.conclusion !== 'failure') continue;
+      if (isSelfExcluded(job.name)) continue;
 
-      let snippet = `--- Job: ${job.name} ---\n`;
+      let snippet = '';
 
       try {
         const logResponse = await github.rest.actions.downloadJobLogsForWorkflowRun({
@@ -74,9 +84,9 @@ async function fetchFailedJobLogs(github, context, { maxLines = 120 } = {}) {
           ? logResponse.data
           : String(logResponse.data);
 
-        snippet += extractRelevantSection(fullLog, maxLines) + '\n';
+        snippet = extractRelevantSection(fullLog, maxLines);
       } catch (e) {
-        snippet += `Could not download logs: ${e.message}\n`;
+        snippet = `Could not download logs: ${e.message}\n`;
         // Fallback: list failed steps
         for (const step of job.steps || []) {
           if (step.conclusion === 'failure') {
@@ -85,15 +95,22 @@ async function fetchFailedJobLogs(github, context, { maxLines = 120 } = {}) {
         }
       }
 
-      logSnippets += snippet + '\n';
+      jobLogs.push({ name: job.name, snippet });
     }
   }
 
-  if (!logSnippets.trim()) {
-    logSnippets = `Failed checks: ${failedNames.join(', ')}\nNo detailed logs available.\n`;
+  // Fallback: if no job logs fetched (e.g. log download failed entirely)
+  if (jobLogs.length === 0) {
+    const fallbackSnippet = `Failed checks: ${failedNames.join(', ')}\nNo detailed logs available.\n`;
+    jobLogs.push({ name: failedNames[0] || 'unknown', snippet: fallbackSnippet });
   }
 
-  return { failedNames, logSnippets, hasFailures: true };
+  // Build combined logSnippets string for backward compat
+  const logSnippets = jobLogs
+    .map(j => `--- Job: ${j.name} ---\n${j.snippet}`)
+    .join('\n\n');
+
+  return { failedNames, logSnippets, jobLogs, hasFailures: true };
 }
 
 module.exports = { fetchFailedJobLogs, extractRelevantSection };
